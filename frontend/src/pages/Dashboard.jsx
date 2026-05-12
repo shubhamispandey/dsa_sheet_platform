@@ -1,40 +1,52 @@
 import { useEffect } from "react";
+
 import { useDispatch, useSelector } from "react-redux";
+
+import { useNavigate } from "react-router-dom";
 
 import {
   fetchProblems,
   fetchTopics,
   setCurrentTopic,
+  resetTopicsState,
 } from "../features/topics/topicsSlice";
 
 import {
   fetchProgress,
   updateProgress,
+  resetProgressState,
 } from "../features/progress/progressSlice";
 
 import { logout } from "../features/auth/authSlice";
-
-import { useNavigate } from "react-router-dom";
 
 import Sidebar from "../components/Sidebar";
 import ProblemList from "../components/ProblemList";
 
 const Dashboard = () => {
   const dispatch = useDispatch();
+
   const navigate = useNavigate();
 
+  // AUTH
+
   const { user } = useSelector((state) => state.auth);
+
+  // TOPICS
 
   const {
     topics,
     currentTopic,
     problems,
+
     topicsLoading,
     problemsLoading,
+
     error,
   } = useSelector((state) => state.topics);
 
-  const { progress } = useSelector((state) => state.progress);
+  // PROGRESS
+
+  const { progress, updateLoading } = useSelector((state) => state.progress);
 
   // FETCH INITIAL DATA
 
@@ -48,23 +60,28 @@ const Dashboard = () => {
       dispatch(fetchTopics());
     }
 
-    dispatch(fetchProgress());
+    if (progress.length === 0) {
+      dispatch(fetchProgress());
+    }
   }, [user, dispatch, navigate]);
 
   // AUTO FETCH CURRENT TOPIC PROBLEMS
 
   useEffect(() => {
-    if (currentTopic && !problems[currentTopic._id]) {
-      dispatch(fetchProblems(currentTopic._id));
-    }
-  }, [currentTopic, dispatch]);
+    if (!currentTopic) return;
 
-  // TOPIC SELECT HANDLER
+    // already cached
+    if (problems[currentTopic._id]) return;
+
+    dispatch(fetchProblems(currentTopic._id));
+  }, [currentTopic?._id]);
+
+  // TOPIC SELECT
 
   const handleTopicSelect = (topic) => {
     dispatch(setCurrentTopic(topic));
 
-    // Avoid duplicate API calls
+    // avoid duplicate requests
     if (!problems[topic._id]) {
       dispatch(fetchProblems(topic._id));
     }
@@ -72,42 +89,88 @@ const Dashboard = () => {
 
   // LOGOUT
 
-  const handleLogout = () => {
-    dispatch(logout());
+  const handleLogout = async () => {
+    await dispatch(logout());
+
+    dispatch(resetTopicsState());
+
+    dispatch(resetProgressState());
+
     navigate("/login");
   };
 
-  // PROGRESS CALCULATIONS
+  // CURRENT TOPIC PROBLEMS
 
   const currentTopicProblems = currentTopic
     ? problems[currentTopic._id] || []
     : [];
-  const totalProblems = currentTopicProblems.length;
+
+  // CURRENT TOPIC IDS
+
   const currentTopicProblemIds = new Set(
     currentTopicProblems.map((problem) => String(problem._id)),
   );
+
+  // COMPLETED COUNT
 
   const completedCount = progress.filter(
     (item) =>
       item.completed && currentTopicProblemIds.has(String(item.problemId)),
   ).length;
 
-  // GUARDS
+  // TOTAL COUNT
 
-  if (!user) return null;
+  const totalProblems = currentTopicProblems.length;
+
+  // LOADING STATE
 
   if (topicsLoading) {
     return (
-      <div className="h-screen flex items-center justify-center">
-        Loading topics...
+      <div className="h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-gray-600 text-lg">Loading topics...</div>
       </div>
     );
   }
 
+  // AUTH GUARD
+
+  if (!user) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-gray-600 text-lg">Redirecting...</div>
+      </div>
+    );
+  }
+
+  // EMPTY TOPICS STATE
+
   if (!topicsLoading && topics.length === 0) {
     return (
-      <div className="h-screen flex items-center justify-center text-gray-500">
-        No topics available
+      <div className="h-screen bg-gray-100 flex flex-col">
+        {/* HEADER */}
+
+        <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900">DSA Sheet</h1>
+
+          <button
+            onClick={handleLogout}
+            className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors"
+          >
+            Logout
+          </button>
+        </header>
+
+        {/* EMPTY STATE */}
+
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="bg-white border border-gray-200 shadow-sm rounded-xl p-10 text-center max-w-md w-full">
+            <h2 className="text-2xl font-semibold text-gray-800 mb-3">
+              No Topics Available
+            </h2>
+
+            <p className="text-gray-500">Topics have not been added yet.</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -144,7 +207,9 @@ const Dashboard = () => {
 
             {/* USER */}
 
-            <span className="text-gray-700">Welcome, {user.name}</span>
+            <span className="text-gray-700 hidden sm:block">
+              Welcome, {user.name}
+            </span>
 
             {/* LOGOUT */}
 
@@ -160,35 +225,56 @@ const Dashboard = () => {
         {/* MAIN */}
 
         <main className="flex-1 overflow-y-auto p-6">
+          {/* ERROR */}
+
           {error && (
-            <div className="mb-4 bg-red-100 text-red-700 px-4 py-3 rounded-md">
+            <div className="mb-4 bg-red-100 border border-red-200 text-red-700 px-4 py-3 rounded-md">
               {error}
             </div>
           )}
 
-          {currentTopic ? (
-            problemsLoading && !problems[currentTopic._id] ? (
-              <div className="text-center text-gray-500">
-                Loading problems...
-              </div>
-            ) : (
-              <ProblemList
-                problems={problems[currentTopic._id] || []}
-                progress={progress}
-                onProgressUpdate={(problemId, completed) =>
-                  dispatch(
-                    updateProgress({
-                      problemId,
-                      completed,
-                    }),
-                  )
-                }
-              />
-            )
-          ) : (
+          {/* NO TOPIC SELECTED */}
+
+          {!currentTopic && (
             <div className="h-full flex items-center justify-center text-gray-500">
               Select a topic from the sidebar to view problems.
             </div>
+          )}
+
+          {/* LOADING PROBLEMS */}
+
+          {currentTopic && problemsLoading && !problems[currentTopic._id] && (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              Loading problems...
+            </div>
+          )}
+
+          {/* EMPTY PROBLEMS */}
+
+          {currentTopic &&
+            !problemsLoading &&
+            currentTopicProblems.length === 0 && (
+              <div className="h-full flex items-center justify-center text-gray-500">
+                No problems available for this topic.
+              </div>
+            )}
+
+          {/* PROBLEM LIST */}
+
+          {currentTopic && currentTopicProblems.length > 0 && (
+            <ProblemList
+              problems={currentTopicProblems}
+              progress={progress}
+              updateLoading={updateLoading}
+              onProgressUpdate={(problemId, completed) =>
+                dispatch(
+                  updateProgress({
+                    problemId,
+                    completed,
+                  }),
+                )
+              }
+            />
           )}
         </main>
       </div>
